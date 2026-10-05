@@ -1,6 +1,6 @@
 # pi-yt
 
-`pi-yt` is a Pi extension package that exposes a narrow transcript workflow for video URLs.
+`pi-yt` is a Pi extension package that exposes a narrow transcript workflow for video URLs. It uses `yt-dlp` as the primary, exact subtitle source and can optionally use Gemini video understanding when YouTube rate-limits an automatic-caption download.
 
 ## MVP scope
 
@@ -8,14 +8,17 @@ The package registers one tool:
 
 - `yt_transcript` (`yt-transcript`): fetch subtitles with `yt-dlp`, normalize them into readable transcript artifacts, and return a compact preview.
 
-The MVP is intentionally limited to transcript/subtitle extraction. It does not expose raw `yt-dlp` arguments, download media, crawl playlists, use browser cookies, access private/authenticated videos, or extract screenshots/frames.
+The package is intentionally limited to transcript extraction. It does not expose raw `yt-dlp` arguments, download media, crawl playlists, use browser cookies, access private/authenticated videos, or extract screenshots/frames.
 
 ## Requirements
 
 - Pi runtime packages.
 - `yt-dlp` installed on `PATH`.
+- Optional: `GEMINI_API_KEY` to opt into the Gemini fallback for the known YouTube automatic-caption HTTP 429 failure.
 
-If `yt-dlp` is unavailable, `yt_transcript` fails with an actionable error instead of attempting a fallback download.
+If `yt-dlp` is unavailable, `yt_transcript` fails with an actionable error instead of attempting a fallback download. Gemini does not replace the primary `yt-dlp` metadata/subtitle workflow and is not used for missing binaries or unrelated failures.
+
+Set `PI_YT_GEMINI_MODEL` to override the fallback model; it defaults to `gemini-2.5-flash`. The Gemini request sends the canonical public YouTube URL and transcript prompt to the Google Gemini API. The fallback is enabled whenever `GEMINI_API_KEY` is present in Pi's environment.
 
 ## Tool inputs
 
@@ -32,7 +35,7 @@ One tool call processes one video resource. Playlist traversal is disabled.
 
 ## Results and artifacts
 
-Successful calls return a truncation-aware cleaned preview plus staged artifact paths:
+Successful `yt-dlp` calls return a truncation-aware cleaned preview plus staged artifact paths:
 
 - raw subtitle file — original subtitle data returned by `yt-dlp`, unchanged.
 - `transcript.txt` — raw parsed transcript text, preserving original segment/timestamp data.
@@ -44,6 +47,15 @@ Successful calls return a truncation-aware cleaned preview plus staged artifact 
 When the preview is truncated, read `transcript.clean.txt` through Pi's `read` tool for the full cleaned transcript, or `transcript.txt` when you need original caption timing/fragments.
 
 If requested subtitles are unavailable, the result reports requested languages plus available manual and auto subtitle languages when `yt-dlp` provides them.
+
+When an automatic YouTube subtitle download fails with HTTP 429 and `GEMINI_API_KEY` is configured, the tool sends the canonical public video URL to Gemini and stages:
+
+- `transcript.gemini.md` — Gemini's generated transcript response.
+- `metadata.json` — provider/model details, the original yt-dlp failure, subtitle availability, and quality warnings.
+
+Gemini output is reported with status `generated`, never as a manual or automatic subtitle track. It may paraphrase, omit speech, or provide approximate timestamps; consumers should preserve the returned warning and use exact yt-dlp artifacts whenever available. Gemini's direct YouTube URL support is a preview service and supports public videos only.
+
+If both yt-dlp and the built-in Gemini fallback fail, the tool instructs the agent to stop and ask the operator to retry later rather than cascading into additional transcript strategies.
 
 ## Installation
 

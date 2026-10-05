@@ -3,6 +3,7 @@ import { withMemoryExtensionFiles } from "pi-extension-kit/testing";
 import {
   buildNoSubtitleToolResult,
   buildPreview,
+  stageGeneratedTranscriptArtifacts,
   stageTranscriptArtifacts,
 } from "./artifacts";
 import type {
@@ -51,6 +52,54 @@ test("stages raw transcript, clean transcript, raw subtitle, and metadata artifa
     const metadata = await files.readText(artifactPath(artifacts, "metadata"));
     expect(metadata).toContain('"selectedTrack"');
     expect(metadata).toContain('"transcriptQuality"');
+  });
+});
+
+test("stages Gemini output as a clearly generated transcript", async () => {
+  await withMemoryExtensionFiles({ extensionName: "pi-yt" }, async (files) => {
+    const result = await stageGeneratedTranscriptArtifacts({
+      context: {
+        request: {
+          url: "https://www.youtube.com/watch?v=abc",
+          languages: ["en"],
+          sourcePreference: "manual_then_auto",
+          includeTimestamps: true,
+          timeoutSec: 30,
+        },
+        metadata: { id: "abc", title: "Generated Fixture" },
+        selectedTrack: { language: "en", source: "auto", ext: "vtt" },
+        availability: {
+          requestedLanguages: ["en"],
+          availableManualLanguages: [],
+          availableAutoLanguages: ["en"],
+        },
+      },
+      transcriptText: "[00:00:01] Generated speech",
+      model: "gemini-test",
+      originalFailure: "HTTP Error 429",
+      stager: files.createArtifactStager({ toolName: "yt_transcript" }),
+    });
+
+    expect(result.details).toMatchObject({
+      status: "generated",
+      provider: "gemini",
+      model: "gemini-test",
+      requestedLanguages: ["en"],
+    });
+    expect(result.details.warnings.join("\n")).toContain("AI-generated");
+    expect(result.contentText).toContain(
+      "generated transcript: gemini/gemini-test"
+    );
+    expect(
+      await files.readText(
+        artifactPath(result.details.artifacts, "generatedTranscriptText")
+      )
+    ).toBe("[00:00:01] Generated speech\n");
+    const metadata = await files.readText(
+      artifactPath(result.details.artifacts, "metadata")
+    );
+    expect(metadata).toContain('"extractionMethod": "gemini_video"');
+    expect(metadata).toContain('"originalYtDlpFailure": "HTTP Error 429"');
   });
 });
 

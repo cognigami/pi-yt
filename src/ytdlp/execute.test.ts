@@ -9,6 +9,7 @@ import {
   fetchSubtitleWithYtDlp,
   type PiExecResult,
   type YtDlpExecHost,
+  YtDlpSubtitleRateLimitError,
 } from "./execute";
 
 test("metadata command uses fixed safe one-resource arguments", () => {
@@ -83,6 +84,92 @@ test("missing yt-dlp binary produces an actionable error", async () => {
       request: request(),
     })
   ).rejects.toThrow('Could not execute "yt-dlp"');
+});
+
+test("classifies YouTube automatic-subtitle HTTP 429 for optional fallback", async () => {
+  let call = 0;
+  let caught: unknown;
+  try {
+    await fetchSubtitleWithYtDlp({
+      pi: fakePi(async () => {
+        call += 1;
+        if (call === 1) {
+          return {
+            stdout: JSON.stringify({
+              id: "abc123",
+              title: "Rate Limited",
+              automatic_captions: { en: [{ ext: "vtt", url: "auto" }] },
+            }),
+            code: 0,
+          };
+        }
+        return {
+          stderr:
+            "ERROR: Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests",
+          code: 1,
+        };
+      }),
+      request: request({
+        url: "https://www.youtube.com/watch?v=abc123",
+      }),
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  expect(caught).toBeInstanceOf(YtDlpSubtitleRateLimitError);
+  expect((caught as YtDlpSubtitleRateLimitError).context).toMatchObject({
+    metadata: { id: "abc123" },
+    selectedTrack: { language: "en", source: "auto" },
+  });
+});
+
+test("does not classify unrelated subtitle failures for provider fallback", async () => {
+  const cases = [
+    {
+      name: "manual YouTube subtitle 429",
+      url: "https://www.youtube.com/watch?v=abc123",
+      metadata: { subtitles: { en: [{ ext: "vtt", url: "manual" }] } },
+      stderr: "HTTP Error 429: Too Many Requests",
+    },
+    {
+      name: "non-YouTube automatic subtitle 429",
+      url: "https://example.com/video",
+      metadata: {
+        automatic_captions: { en: [{ ext: "vtt", url: "auto" }] },
+      },
+      stderr: "HTTP Error 429: Too Many Requests",
+    },
+    {
+      name: "YouTube automatic subtitle non-429",
+      url: "https://www.youtube.com/watch?v=abc123",
+      metadata: {
+        automatic_captions: { en: [{ ext: "vtt", url: "auto" }] },
+      },
+      stderr: "HTTP Error 500: Internal Server Error",
+    },
+  ];
+
+  for (const testCase of cases) {
+    let call = 0;
+    let caught: unknown;
+    try {
+      await fetchSubtitleWithYtDlp({
+        pi: fakePi(async () => {
+          call += 1;
+          return call === 1
+            ? { stdout: JSON.stringify(testCase.metadata), code: 0 }
+            : { stderr: testCase.stderr, code: 1 };
+        }),
+        request: request({ url: testCase.url }),
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught, testCase.name).not.toBeInstanceOf(
+      YtDlpSubtitleRateLimitError
+    );
+  }
 });
 
 test("non-zero exits surface stderr without media fallback", async () => {

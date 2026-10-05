@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import type {
   NormalizedYtTranscriptRequest,
   SelectedSubtitleTrack,
+  SubtitleFetchContext,
   SubtitleFetchResult,
   YtDlpMetadata,
 } from "./contracts";
@@ -81,13 +82,30 @@ export async function fetchSubtitleWithYtDlp(
       };
     }
 
-    await runYtDlpCommand({
-      pi: options.pi,
-      args: buildSubtitleDownloadArgs(options.request.url, selectedTrack),
-      cwd: workDir,
-      signal: options.signal,
-      timeoutMs: options.request.timeoutSec * 1000,
-    });
+    try {
+      await runYtDlpCommand({
+        pi: options.pi,
+        args: buildSubtitleDownloadArgs(options.request.url, selectedTrack),
+        cwd: workDir,
+        signal: options.signal,
+        timeoutMs: options.request.timeoutSec * 1000,
+      });
+    } catch (error) {
+      if (
+        selectedTrack.source === "auto" &&
+        isYouTubeUrl(options.request.url) &&
+        isHttp429Error(error)
+      ) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new YtDlpSubtitleRateLimitError(message, {
+          request: options.request,
+          metadata,
+          selectedTrack,
+          availability,
+        });
+      }
+      throw error;
+    }
 
     const subtitlePath = await findSubtitleFile(workDir, readDirectory);
     if (!subtitlePath) {
@@ -148,6 +166,16 @@ export class YtDlpExecutionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "YtDlpExecutionError";
+  }
+}
+
+export class YtDlpSubtitleRateLimitError extends YtDlpExecutionError {
+  constructor(
+    message: string,
+    readonly context: SubtitleFetchContext
+  ) {
+    super(message);
+    this.name = "YtDlpSubtitleRateLimitError";
   }
 }
 
@@ -280,6 +308,24 @@ function compactOutput(text: string): string | undefined {
 
 function formatCommand(args: readonly string[]): string {
   return [YT_DLP_BINARY, ...args].join(" ");
+}
+
+function isHttp429Error(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /HTTP (?:Error )?429|Too Many Requests/iu.test(message);
+}
+
+function isYouTubeUrl(input: string): boolean {
+  try {
+    const hostname = new URL(input).hostname.toLowerCase();
+    return (
+      hostname === "youtu.be" ||
+      hostname === "youtube.com" ||
+      hostname.endsWith(".youtube.com")
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isMissingBinaryError(error: unknown, message: string): boolean {

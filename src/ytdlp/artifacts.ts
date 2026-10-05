@@ -5,11 +5,13 @@ import {
   formatJson,
 } from "pi-extension-kit/files";
 import type {
+  SubtitleFetchContext,
   SubtitleFetchNoSubtitles,
   SubtitleFetchSuccess,
   TranscriptArtifactKey,
   TranscriptCleaningStats,
   TranscriptSegment,
+  YtTranscriptGeneratedDetails,
   YtTranscriptNoSubtitleDetails,
   YtTranscriptSuccessDetails,
   YtTranscriptToolDetails,
@@ -17,6 +19,8 @@ import type {
 import { cleanTranscriptSegments, renderTranscript } from "./subtitles";
 
 export const TRANSCRIPT_PREVIEW_LIMIT = 4000;
+export const GEMINI_GENERATED_WARNING =
+  "AI-generated transcript; wording, completeness, and timestamps may differ from the source.";
 
 const defaultFiles = createExtensionFiles({ extensionName: "pi-yt" });
 const defaultStager = defaultFiles.createArtifactStager({
@@ -126,6 +130,75 @@ export async function stageTranscriptArtifacts(
   };
 }
 
+export interface StageGeneratedTranscriptOptions {
+  context: SubtitleFetchContext;
+  transcriptText: string;
+  model: string;
+  originalFailure: string;
+  providerWarnings?: readonly string[];
+  signal?: AbortSignal;
+  stager?: ArtifactStager;
+}
+
+export async function stageGeneratedTranscriptArtifacts(
+  options: StageGeneratedTranscriptOptions
+): Promise<{ contentText: string; details: YtTranscriptGeneratedDetails }> {
+  throwIfAborted(options.signal);
+  const transcriptText = options.transcriptText.trim();
+  const preview = buildPreview(transcriptText, TRANSCRIPT_PREVIEW_LIMIT);
+  const warnings = [
+    GEMINI_GENERATED_WARNING,
+    "Gemini was used after YouTube rate-limited the automatic subtitle download.",
+    ...(options.providerWarnings ?? []),
+  ];
+  const stager = options.stager ?? defaultStager;
+  const detailsWithoutArtifacts = buildGeneratedDetails(
+    options,
+    preview,
+    warnings,
+    []
+  );
+  const staged = await stager.stageOutput<TranscriptArtifactKey>({
+    artifacts: [
+      {
+        key: "generatedTranscriptText",
+        label: "Gemini transcript",
+        fileName: "transcript.gemini.md",
+        content: `${transcriptText}\n`,
+        primary: true,
+      },
+      {
+        key: "metadata",
+        label: "metadata",
+        fileName: "metadata.json",
+        content: formatJson({
+          extractionMethod: "gemini_video",
+          provider: "gemini",
+          model: options.model,
+          originalYtDlpFailure: options.originalFailure,
+          request: options.context.request,
+          selectedTrack: options.context.selectedTrack,
+          availability: options.context.availability,
+          metadata: options.context.metadata,
+          warnings,
+        }),
+      },
+    ],
+    appendText: () => buildGeneratedContentText(detailsWithoutArtifacts),
+  });
+
+  throwIfAborted(options.signal);
+  return {
+    contentText: staged.contentText,
+    details: buildGeneratedDetails(
+      options,
+      preview,
+      warnings,
+      staged.artifacts
+    ),
+  };
+}
+
 export function buildNoSubtitleToolResult(fetch: SubtitleFetchNoSubtitles): {
   content: Array<{ type: "text"; text: string }>;
   details: YtTranscriptNoSubtitleDetails;
@@ -174,6 +247,22 @@ export function buildSuccessContentText(options: {
   return lines.filter((line): line is string => line !== undefined).join("\n");
 }
 
+export function buildGeneratedContentText(
+  details: YtTranscriptGeneratedDetails
+): string {
+  return [
+    details.title ? `title: ${details.title}` : undefined,
+    `generated transcript: ${details.provider}/${details.model}`,
+    ...details.warnings.map((warning) => `warning: ${warning}`),
+    details.previewTruncated
+      ? "preview: truncated; read the staged Gemini transcript for the full text."
+      : "preview:",
+    details.previewText,
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
+}
+
 export function buildNoSubtitleContentText(
   details: YtTranscriptNoSubtitleDetails
 ): string {
@@ -187,6 +276,33 @@ export function buildNoSubtitleContentText(
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n");
+}
+
+function buildGeneratedDetails(
+  options: StageGeneratedTranscriptOptions,
+  preview: { text: string; truncated: boolean },
+  warnings: string[],
+  artifacts: YtTranscriptGeneratedDetails["artifacts"]
+): YtTranscriptGeneratedDetails {
+  const { context } = options;
+  return {
+    status: "generated",
+    title: context.metadata.title,
+    originalUrl: context.metadata.original_url ?? context.request.url,
+    webpageUrl: context.metadata.webpage_url,
+    videoId: context.metadata.id,
+    channel: context.metadata.channel,
+    uploader: context.metadata.uploader,
+    uploadDate: context.metadata.upload_date,
+    duration: context.metadata.duration,
+    requestedLanguages: [...context.request.languages],
+    provider: "gemini",
+    model: options.model,
+    previewText: preview.text,
+    previewTruncated: preview.truncated,
+    warnings,
+    artifacts,
+  };
 }
 
 function buildSuccessDetails(
@@ -255,6 +371,12 @@ function buildMetadataArtifact(
   };
 }
 
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw signal.reason ?? new Error("Transcript request aborted.");
+  }
+}
+
 function formatLanguageList(languages: readonly string[]): string {
   return languages.length === 0 ? "none" : languages.join(", ");
 }
@@ -267,6 +389,7 @@ export function isYtTranscriptDetails(
     value !== null &&
     "status" in value &&
     ((value as { status?: unknown }).status === "success" ||
+      (value as { status?: unknown }).status === "generated" ||
       (value as { status?: unknown }).status === "no_subtitles")
   );
 }

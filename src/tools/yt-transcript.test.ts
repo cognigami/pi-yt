@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { YtDlpSubtitleRateLimitError } from "../ytdlp/execute";
 import ytTranscriptTool, { executeYtTranscript } from "./yt-transcript";
 
 test("tool registration exposes prompt guidance and no raw yt-dlp argv schema", () => {
@@ -122,6 +123,178 @@ test("mocked end-to-end pipeline parses fixture subtitles and returns details", 
     subtitleSource: "manual",
     segmentCount: 3,
   });
+});
+
+test("falls back to Gemini only for a classified YouTube subtitle 429", async () => {
+  let generatedUrl = "";
+  const result = await executeYtTranscript({
+    pi: fakePi(),
+    params: { url: "https://www.youtube.com/watch?v=abc123&list=WL" },
+    geminiFallback: { apiKey: "test-key", model: "gemini-test" },
+    fetchSubtitles: async ({ request }) => {
+      throw new YtDlpSubtitleRateLimitError("HTTP Error 429", {
+        request,
+        metadata: { title: "Fallback Fixture" },
+        selectedTrack: { language: "en", source: "auto", ext: "vtt" },
+        availability: {
+          requestedLanguages: ["en"],
+          availableManualLanguages: [],
+          availableAutoLanguages: ["en"],
+        },
+      });
+    },
+    generateTranscript: async (options) => {
+      generatedUrl = options.url;
+      return {
+        text: "[00:00:01] Generated speech",
+        model: options.model ?? "unexpected",
+        warnings: [],
+        usage: {
+          input: 100,
+          output: 20,
+          cacheRead: 0,
+          reasoning: 0,
+          totalTokens: 120,
+        },
+      };
+    },
+    stageGeneratedArtifacts: async (options) => ({
+      contentText: `generated: ${options.model}`,
+      details: {
+        status: "generated",
+        title: options.context.metadata.title,
+        originalUrl: options.context.request.url,
+        videoId: options.context.metadata.id,
+        requestedLanguages: options.context.request.languages,
+        provider: "gemini",
+        model: options.model,
+        previewText: options.transcriptText,
+        previewTruncated: false,
+        warnings: ["AI-generated transcript"],
+        artifacts: [],
+      },
+    }),
+  });
+
+  expect(generatedUrl).toBe("https://www.youtube.com/watch?v=abc123");
+  expect(result.content[0]?.text).toBe("generated: gemini-test");
+  expect(result.details).toMatchObject({
+    status: "generated",
+    provider: "gemini",
+    model: "gemini-test",
+  });
+  expect(result.usage).toMatchObject({
+    input: 100,
+    output: 20,
+    totalTokens: 120,
+  });
+});
+
+test("preserves cancellation that arrives during generated artifact staging", async () => {
+  const controller = new AbortController();
+  const cancellation = new Error("cancelled during staging");
+  let caught: unknown;
+  try {
+    await executeYtTranscript({
+      pi: fakePi(),
+      params: { url: "https://www.youtube.com/watch?v=abc123" },
+      signal: controller.signal,
+      geminiFallback: { apiKey: "test-key", model: "gemini-test" },
+      fetchSubtitles: async ({ request }) => {
+        throw new YtDlpSubtitleRateLimitError("HTTP Error 429", {
+          request,
+          metadata: { id: "abc123" },
+          selectedTrack: { language: "en", source: "auto" },
+          availability: {
+            requestedLanguages: ["en"],
+            availableManualLanguages: [],
+            availableAutoLanguages: ["en"],
+          },
+        });
+      },
+      generateTranscript: async () => ({
+        text: "Generated speech",
+        model: "gemini-test",
+        warnings: [],
+      }),
+      stageGeneratedArtifacts: async (options) => {
+        controller.abort(cancellation);
+        return {
+          contentText: "should not be returned",
+          details: {
+            status: "generated",
+            originalUrl: options.context.request.url,
+            requestedLanguages: ["en"],
+            provider: "gemini",
+            model: options.model,
+            previewText: options.transcriptText,
+            previewTruncated: false,
+            warnings: [],
+            artifacts: [],
+          },
+        };
+      },
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  expect(caught).toBe(cancellation);
+});
+
+test("tells the operator to retry after both transcript methods fail", async () => {
+  await expect(
+    executeYtTranscript({
+      pi: fakePi(),
+      params: { url: "https://www.youtube.com/watch?v=abc123" },
+      geminiFallback: { apiKey: "test-key", model: "gemini-test" },
+      fetchSubtitles: async ({ request }) => {
+        throw new YtDlpSubtitleRateLimitError("HTTP Error 429", {
+          request,
+          metadata: { id: "abc123" },
+          selectedTrack: { language: "en", source: "auto" },
+          availability: {
+            requestedLanguages: ["en"],
+            availableManualLanguages: [],
+            availableAutoLanguages: ["en"],
+          },
+        });
+      },
+      generateTranscript: async () => {
+        throw new Error("Gemini quota exhausted");
+      },
+    })
+  ).rejects.toThrow(
+    "Stop and ask the operator to retry later; do not attempt another transcript fallback."
+  );
+});
+
+test("preserves the yt-dlp 429 when Gemini fallback is not configured", async () => {
+  let generated = false;
+  await expect(
+    executeYtTranscript({
+      pi: fakePi(),
+      params: { url: "https://www.youtube.com/watch?v=abc123" },
+      geminiFallback: null,
+      fetchSubtitles: async ({ request }) => {
+        throw new YtDlpSubtitleRateLimitError("HTTP Error 429", {
+          request,
+          metadata: { id: "abc123" },
+          selectedTrack: { language: "en", source: "auto" },
+          availability: {
+            requestedLanguages: ["en"],
+            availableManualLanguages: [],
+            availableAutoLanguages: ["en"],
+          },
+        });
+      },
+      generateTranscript: async () => {
+        generated = true;
+        return { text: "unexpected", model: "unexpected", warnings: [] };
+      },
+    })
+  ).rejects.toThrow("set GEMINI_API_KEY to opt in");
+  expect(generated).toBe(false);
 });
 
 function fakePi(): Pick<ExtensionAPI, "exec"> {

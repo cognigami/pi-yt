@@ -104,11 +104,19 @@ export interface SubtitleFetchNoSubtitles {
   warnings: string[];
 }
 
+export interface SubtitleFetchContext {
+  request: NormalizedYtTranscriptRequest;
+  metadata: YtDlpMetadata;
+  selectedTrack: SelectedSubtitleTrack;
+  availability: SubtitleAvailability;
+}
+
 export type SubtitleFetchResult =
   | SubtitleFetchSuccess
   | SubtitleFetchNoSubtitles;
 
 export type TranscriptArtifactKey =
+  | "generatedTranscriptText"
   | "transcriptText"
   | "transcriptJson"
   | "cleanTranscriptText"
@@ -141,6 +149,25 @@ export interface YtTranscriptSuccessDetails {
   artifacts: readonly TranscriptArtifact[];
 }
 
+export interface YtTranscriptGeneratedDetails {
+  status: "generated";
+  title?: string;
+  originalUrl: string;
+  webpageUrl?: string;
+  videoId?: string;
+  channel?: string;
+  uploader?: string;
+  uploadDate?: string;
+  duration?: number;
+  requestedLanguages: string[];
+  provider: "gemini";
+  model: string;
+  previewText: string;
+  previewTruncated: boolean;
+  warnings: string[];
+  artifacts: readonly TranscriptArtifact[];
+}
+
 export interface YtTranscriptNoSubtitleDetails {
   status: "no_subtitles";
   originalUrl: string;
@@ -154,6 +181,7 @@ export interface YtTranscriptNoSubtitleDetails {
 
 export type YtTranscriptToolDetails =
   | YtTranscriptSuccessDetails
+  | YtTranscriptGeneratedDetails
   | YtTranscriptNoSubtitleDetails;
 
 export function normalizeYtTranscriptRequest(

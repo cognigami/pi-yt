@@ -100,6 +100,21 @@ Use `pi-extension-kit` artifact/file helpers where practical so output paths and
 
 ## Error and Fallback Behavior
 
+### Gemini fallback amendment
+
+`yt-dlp` remains the primary and authoritative subtitle source. A configured Gemini API key opts into one narrow degraded fallback: when YouTube returns HTTP 429 while `yt-dlp` downloads a selected automatic-caption track, `pi-yt` may pass the canonical public YouTube URL to Gemini and request a complete transcript.
+
+This fallback is intentionally independent of `pi-web-access` and does not download or upload an audio track. It must:
+
+- Run only for the classified YouTube automatic-subtitle 429 failure, not for missing binaries or unrelated errors.
+- Report the result as `generated`, not as a manual or automatic subtitle source.
+- Preserve the original yt-dlp failure and Gemini provider/model in metadata.
+- Warn that wording, completeness, and timestamps may differ from the source.
+- Stage the raw generated response without fabricating VTT or structured subtitle segments.
+- Remain disabled unless `GEMINI_API_KEY` is present in Pi's environment.
+
+This trades exact subtitle provenance for availability while avoiding the shared failure path, media download, conversion, and upload costs of an audio-ASR fallback.
+
 If no requested-language transcript is available, the tool should return a clear non-success result with enough metadata to support a next step, such as:
 
 - Requested languages.
