@@ -1,17 +1,19 @@
 /** Compact TUI rendering helpers for pi-yt tools. */
 import {
-  formatToolCallRow,
-  renderToolCallRow,
-  renderToolResultView,
+  createToolArtifactOutputSection,
+  formatToolCallLine,
+  joinCallSegments,
   summarizeItemList,
   summarizeOneLine,
-  type ToolCallComponent,
-  type ToolCallSegment,
+  ToolCallComponent,
   type ToolCallTheme,
+  ToolResultComponent,
+  type ToolResultContent,
   type ToolResultTheme,
+  withToolName,
 } from "pi-extension-kit/tool-chrome";
 import { isYtTranscriptDetails } from "./artifacts";
-import type { YtTranscriptParams } from "./contracts";
+import type { YtTranscriptParams, YtTranscriptToolDetails } from "./contracts";
 
 export interface YtCallRenderOptions {
   name: string;
@@ -25,21 +27,30 @@ export function formatYtToolCall(
   theme: ToolCallTheme,
   options: YtCallRenderOptions
 ): string {
-  return formatToolCallRow(theme, toYtToolCallRow(options));
+  return formatToolCallLine(options.name, theme, {
+    detail: joinCallSegments(...buildYtToolCallSummary(options)),
+    placeholder: options.placeholder,
+  });
 }
 
 export function renderYtToolCall(
   theme: ToolCallTheme,
-  context: { lastComponent?: unknown },
+  context: { lastComponent?: unknown; argsComplete?: boolean },
   options: YtCallRenderOptions
 ): ToolCallComponent {
-  return renderToolCallRow(theme, context, toYtToolCallRow(options));
+  return new ToolCallComponent({
+    context: withToolName(context, options.name),
+    theme,
+    summary: buildYtToolCallSegments(options),
+    pending: options.placeholder,
+    empty: options.placeholder,
+  });
 }
 
 export function renderYtTranscriptCall(
   args: Partial<YtTranscriptParams> | undefined,
   theme: ToolCallTheme,
-  context: { lastComponent?: unknown }
+  context: { lastComponent?: unknown; argsComplete?: boolean }
 ): ToolCallComponent {
   return renderYtToolCall(theme, context, {
     name: "yt_transcript",
@@ -51,28 +62,46 @@ export function renderYtTranscriptCall(
 }
 
 export function renderYtTranscriptResult(
-  result: { details?: unknown } | undefined,
+  result:
+    | {
+        details?: unknown;
+        content?: readonly { type: string; text?: string }[];
+      }
+    | undefined,
   renderOptions: { expanded?: boolean; isPartial?: boolean },
   theme: ToolResultTheme,
-  context: { lastComponent?: unknown }
-): ToolCallComponent {
+  context: { lastComponent?: unknown; isError?: boolean }
+): ToolResultComponent {
   const details = isYtTranscriptDetails(result?.details)
     ? result.details
     : undefined;
+
+  return new ToolResultComponent({
+    context,
+    theme,
+    options: renderOptions,
+    result,
+    view: buildYtTranscriptResultView(details),
+  });
+}
+
+function buildYtTranscriptResultView(
+  details: YtTranscriptToolDetails | undefined
+) {
   if (!details) {
-    return renderToolResultView(theme, context, renderOptions, {
+    return {
       partial: "Fetching transcript...",
       empty: "No transcript metadata returned.",
-    });
+    };
   }
 
   if (details.status === "no_subtitles") {
-    return renderToolResultView(theme, context, renderOptions, {
+    return {
       partial: "Fetching transcript...",
       collapsed: {
         text: `no subtitles for ${details.requestedLanguages.join(", ")}`,
-        color: "warning",
-        mode: "truncate",
+        color: "warning" as const,
+        mode: "truncate" as const,
       },
       expanded: [
         details.title
@@ -99,75 +128,66 @@ export function renderYtTranscriptResult(
           mode: "wrap" as const,
         })),
       ].filter(isDefined),
-    });
+    };
   }
 
   const summary = `${details.selectedLanguage}/${details.subtitleSource}: ${details.cleanSegmentCount} clean segments (${details.segmentCount} raw)`;
-  return renderToolResultView(theme, context, renderOptions, {
+  const artifactSection = createToolArtifactOutputSection(details.artifacts, {
+    collapsed: "all",
+  });
+  const expanded: ToolResultContent = [
+    details.title
+      ? { text: `title: ${details.title}`, mode: "truncate" as const }
+      : undefined,
+    {
+      text: summary,
+      color: "success" as const,
+      mode: "truncate" as const,
+    },
+    ...details.warnings.map((warning) => ({
+      text: `warning: ${warning}`,
+      color: "warning" as const,
+      mode: "wrap" as const,
+    })),
+    artifactSection,
+  ].filter(isDefined);
+
+  return {
     partial: "Fetching transcript...",
     collapsed: {
       text: details.title ? `${summary} · ${details.title}` : summary,
-      mode: "truncate",
+      mode: "truncate" as const,
     },
-    expanded: [
-      details.title
-        ? { text: `title: ${details.title}`, mode: "truncate" as const }
-        : undefined,
-      {
-        text: summary,
-        color: "success" as const,
-        mode: "truncate" as const,
-      },
-      ...details.warnings.map((warning) => ({
-        text: `warning: ${warning}`,
-        color: "warning" as const,
-        mode: "wrap" as const,
-      })),
-      {
-        kind: "artifacts" as const,
-        artifacts: [
-          {
-            label: "clean transcript",
-            path: details.artifacts.cleanTranscriptTextPath,
-            primary: true,
-          },
-          {
-            label: "clean json",
-            path: details.artifacts.cleanTranscriptJsonPath,
-          },
-          {
-            label: "raw transcript",
-            path: details.artifacts.transcriptTextPath,
-          },
-          { label: "raw json", path: details.artifacts.transcriptJsonPath },
-          { label: "subtitle", path: details.artifacts.rawSubtitlePath },
-          { label: "metadata", path: details.artifacts.metadataJsonPath },
-        ],
-        collapsed: "primary" as const,
-      },
-    ].filter(isDefined),
-  });
+    expanded,
+    raw: artifactSection,
+  };
 }
 
-function toYtToolCallRow(options: YtCallRenderOptions) {
-  const segments: ToolCallSegment[] = [];
-  const url = summarizeOneLine(options.url, 90);
-  if (url) segments.push({ text: url, color: "accent" });
+function buildYtToolCallSegments(options: YtCallRenderOptions): Array<{
+  text: string;
+  color: "accent" | "muted" | "dim";
+}> {
+  const [url, languages, sourcePreference] = buildYtToolCallSummary(options);
+  return [
+    url ? { text: url, color: "accent" as const } : undefined,
+    languages ? { text: languages, color: "muted" as const } : undefined,
+    sourcePreference
+      ? { text: sourcePreference, color: "dim" as const }
+      : undefined,
+  ].filter(isDefined);
+}
 
-  const languages = summarizeItemList(
-    options.languages ? [...options.languages] : undefined,
-    { maxItems: 4, separator: "," }
-  );
-  if (languages) segments.push({ text: languages, color: "muted" });
-
-  const sourcePreference = summarizeOneLine(options.sourcePreference, 30);
-  if (sourcePreference) segments.push({ text: sourcePreference, color: "dim" });
-
-  return {
-    name: options.name,
-    segments,
-    placeholder: options.placeholder,
-  };
+function buildYtToolCallSummary(
+  options: YtCallRenderOptions
+): [string | undefined, string | undefined, string | undefined] {
+  return [
+    summarizeOneLine(options.url, 90),
+    summarizeItemList(options.languages ? [...options.languages] : undefined, {
+      maxItems: 4,
+      separator: ",",
+    }),
+    summarizeOneLine(options.sourcePreference, 30),
+  ];
 }
 
 function formatLanguages(languages: readonly string[]): string {

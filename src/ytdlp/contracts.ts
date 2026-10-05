@@ -1,4 +1,5 @@
 /** Shared contracts and validation for the pi-yt transcript MVP. */
+import type { StagedOutputArtifact } from "pi-extension-kit/files";
 
 export const DEFAULT_LANGUAGES = ["en"] as const;
 export const DEFAULT_SOURCE_PREFERENCE = "manual_then_auto" as const;
@@ -107,16 +108,15 @@ export type SubtitleFetchResult =
   | SubtitleFetchSuccess
   | SubtitleFetchNoSubtitles;
 
-export interface TranscriptArtifacts {
-  /** Legacy raw transcript text path. */
-  transcriptTextPath?: string;
-  /** Legacy raw transcript JSON path. */
-  transcriptJsonPath?: string;
-  cleanTranscriptTextPath?: string;
-  cleanTranscriptJsonPath?: string;
-  rawSubtitlePath?: string;
-  metadataJsonPath?: string;
-}
+export type TranscriptArtifactKey =
+  | "transcriptText"
+  | "transcriptJson"
+  | "cleanTranscriptText"
+  | "cleanTranscriptJson"
+  | "rawSubtitle"
+  | "metadata";
+
+export type TranscriptArtifact = StagedOutputArtifact<TranscriptArtifactKey>;
 
 export interface YtTranscriptSuccessDetails {
   status: "success";
@@ -138,7 +138,7 @@ export interface YtTranscriptSuccessDetails {
   previewText: string;
   previewTruncated: boolean;
   warnings: string[];
-  artifacts: TranscriptArtifacts;
+  artifacts: readonly TranscriptArtifact[];
 }
 
 export interface YtTranscriptNoSubtitleDetails {

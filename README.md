@@ -45,6 +45,16 @@ When the preview is truncated, read `transcript.clean.txt` through Pi's `read` t
 
 If requested subtitles are unavailable, the result reports requested languages plus available manual and auto subtitle languages when `yt-dlp` provides them.
 
+## Installation
+
+This repository currently supports the managed local install path:
+
+```bash
+just install
+```
+
+That recipe builds the extension and installs both its bundle and the shared `pi-extension-kit` runtime. Do not use a generic npm/Bun global install or publish this package as-is: `pi-extension-kit` is a local, unpublished dependency that remains external in the bundle.
+
 ## Development
 
 The package follows the local `pi-extension-kit` extension scaffold and references it via `file:../pi-extension-kit` in `package.json`.

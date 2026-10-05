@@ -7,6 +7,7 @@ import {
 import type {
   SubtitleFetchNoSubtitles,
   SubtitleFetchSuccess,
+  TranscriptArtifactKey,
   TranscriptCleaningStats,
   TranscriptSegment,
   YtTranscriptNoSubtitleDetails,
@@ -21,14 +22,6 @@ const defaultFiles = createExtensionFiles({ extensionName: "pi-yt" });
 const defaultStager = defaultFiles.createArtifactStager({
   toolName: "yt_transcript",
 });
-
-type ArtifactKey =
-  | "transcriptText"
-  | "transcriptJson"
-  | "cleanTranscriptText"
-  | "cleanTranscriptJson"
-  | "rawSubtitle"
-  | "metadata";
 
 export interface StageTranscriptOptions {
   fetch: SubtitleFetchSuccess;
@@ -55,25 +48,18 @@ export async function stageTranscriptArtifacts(
   const preview = buildPreview(cleanTranscriptText, TRANSCRIPT_PREVIEW_LIMIT);
   const stager = options.stager ?? defaultStager;
 
-  return await stager.stage<ArtifactKey, YtTranscriptSuccessDetails>({
-    files: [
-      {
-        key: "transcriptText",
-        fileName: "transcript.txt",
-        content: transcriptText,
-      },
-      {
-        key: "transcriptJson",
-        fileName: "transcript.json",
-        content: formatJson({ segments: options.segments }),
-      },
+  const staged = await stager.stageOutput<TranscriptArtifactKey>({
+    artifacts: [
       {
         key: "cleanTranscriptText",
+        label: "clean transcript",
         fileName: "transcript.clean.txt",
         content: cleanTranscriptText,
+        primary: true,
       },
       {
         key: "cleanTranscriptJson",
+        label: "clean transcript JSON",
         fileName: "transcript.clean.json",
         content: formatJson({
           segments: cleanTranscript.segments,
@@ -81,12 +67,26 @@ export async function stageTranscriptArtifacts(
         }),
       },
       {
+        key: "transcriptText",
+        label: "raw transcript",
+        fileName: "transcript.txt",
+        content: transcriptText,
+      },
+      {
+        key: "transcriptJson",
+        label: "raw transcript JSON",
+        fileName: "transcript.json",
+        content: formatJson({ segments: options.segments }),
+      },
+      {
         key: "rawSubtitle",
+        label: "raw subtitle",
         fileName: options.fetch.rawSubtitleFileName,
         content: options.fetch.rawSubtitleContent,
       },
       {
         key: "metadata",
+        label: "metadata",
         fileName: "metadata.json",
         content: formatJson(
           buildMetadataArtifact(
@@ -98,7 +98,7 @@ export async function stageTranscriptArtifacts(
         ),
       },
     ],
-    buildContentText: ({ paths }) =>
+    appendText: () =>
       buildSuccessContentText({
         details: buildSuccessDetails(
           options.fetch,
@@ -107,34 +107,23 @@ export async function stageTranscriptArtifacts(
           cleanTranscript.stats,
           preview,
           warnings,
-          {
-            transcriptTextPath: paths.transcriptText,
-            transcriptJsonPath: paths.transcriptJson,
-            cleanTranscriptTextPath: paths.cleanTranscriptText,
-            cleanTranscriptJsonPath: paths.cleanTranscriptJson,
-            rawSubtitlePath: paths.rawSubtitle,
-            metadataJsonPath: paths.metadata,
-          }
+          []
         ),
       }),
-    buildDetails: ({ paths }) =>
-      buildSuccessDetails(
-        options.fetch,
-        options.segments,
-        cleanTranscript.segments,
-        cleanTranscript.stats,
-        preview,
-        warnings,
-        {
-          transcriptTextPath: paths.transcriptText,
-          transcriptJsonPath: paths.transcriptJson,
-          cleanTranscriptTextPath: paths.cleanTranscriptText,
-          cleanTranscriptJsonPath: paths.cleanTranscriptJson,
-          rawSubtitlePath: paths.rawSubtitle,
-          metadataJsonPath: paths.metadata,
-        }
-      ),
   });
+
+  return {
+    contentText: staged.contentText,
+    details: buildSuccessDetails(
+      options.fetch,
+      options.segments,
+      cleanTranscript.segments,
+      cleanTranscript.stats,
+      preview,
+      warnings,
+      staged.artifacts
+    ),
+  };
 }
 
 export function buildNoSubtitleToolResult(fetch: SubtitleFetchNoSubtitles): {
@@ -177,24 +166,6 @@ export function buildSuccessContentText(options: {
     details.title ? `title: ${details.title}` : undefined,
     `selected: ${details.selectedLanguage} (${details.subtitleSource})`,
     `segments: raw ${details.segmentCount}, clean ${details.cleanSegmentCount}`,
-    details.artifacts.cleanTranscriptTextPath
-      ? `clean transcript: ${details.artifacts.cleanTranscriptTextPath}`
-      : undefined,
-    details.artifacts.cleanTranscriptJsonPath
-      ? `clean transcript JSON: ${details.artifacts.cleanTranscriptJsonPath}`
-      : undefined,
-    details.artifacts.transcriptTextPath
-      ? `raw transcript: ${details.artifacts.transcriptTextPath}`
-      : undefined,
-    details.artifacts.transcriptJsonPath
-      ? `raw transcript JSON: ${details.artifacts.transcriptJsonPath}`
-      : undefined,
-    details.artifacts.rawSubtitlePath
-      ? `raw subtitle: ${details.artifacts.rawSubtitlePath}`
-      : undefined,
-    details.artifacts.metadataJsonPath
-      ? `metadata: ${details.artifacts.metadataJsonPath}`
-      : undefined,
     details.previewTruncated
       ? "preview: truncated; read the staged clean transcript for the full text."
       : "preview:",

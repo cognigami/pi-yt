@@ -33,22 +33,22 @@ test("stages raw transcript, clean transcript, raw subtitle, and metadata artifa
     expect(result.contentText).toContain("clean transcript:");
     expect(result.contentText).toContain("raw transcript:");
     const artifacts = result.details.artifacts;
-    expect(await files.readText(artifacts.transcriptTextPath ?? "")).toBe(
-      "[00:00:00] Hello\n[00:00:02] World\n"
-    );
-    expect(await files.readText(artifacts.transcriptJsonPath ?? "")).toContain(
-      '"segments"'
-    );
-    expect(await files.readText(artifacts.cleanTranscriptTextPath ?? "")).toBe(
-      "[00:00:00] Hello World\n"
-    );
     expect(
-      await files.readText(artifacts.cleanTranscriptJsonPath ?? "")
+      await files.readText(artifactPath(artifacts, "transcriptText"))
+    ).toBe("[00:00:00] Hello\n[00:00:02] World\n");
+    expect(
+      await files.readText(artifactPath(artifacts, "transcriptJson"))
+    ).toContain('"segments"');
+    expect(
+      await files.readText(artifactPath(artifacts, "cleanTranscriptText"))
+    ).toBe("[00:00:00] Hello World\n");
+    expect(
+      await files.readText(artifactPath(artifacts, "cleanTranscriptJson"))
     ).toContain('"cleaning"');
-    expect(await files.readText(artifacts.rawSubtitlePath ?? "")).toBe(
+    expect(await files.readText(artifactPath(artifacts, "rawSubtitle"))).toBe(
       "WEBVTT\n"
     );
-    const metadata = await files.readText(artifacts.metadataJsonPath ?? "");
+    const metadata = await files.readText(artifactPath(artifacts, "metadata"));
     expect(metadata).toContain('"selectedTrack"');
     expect(metadata).toContain('"transcriptQuality"');
   });
@@ -87,6 +87,17 @@ test("no-subtitle result reports available languages", () => {
   });
   expect(result.content[0]?.text).toContain("available manual languages: en");
 });
+
+function artifactPath(
+  artifacts: readonly { key: string; kind: string; path?: string }[],
+  key: string
+): string {
+  const artifact = artifacts.find((candidate) => candidate.key === key);
+  if (artifact?.kind !== "file" || !artifact.path) {
+    throw new Error(`missing file artifact: ${key}`);
+  }
+  return artifact.path;
+}
 
 function successFetch(): SubtitleFetchSuccess {
   return {

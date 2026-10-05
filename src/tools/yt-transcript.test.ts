@@ -102,14 +102,15 @@ test("mocked end-to-end pipeline parses fixture subtitles and returns details", 
         previewText: segments.map((segment) => segment.text).join("\n"),
         previewTruncated: false,
         warnings: [],
-        artifacts: {
-          transcriptTextPath: "/tmp/transcript.txt",
-          transcriptJsonPath: "/tmp/transcript.json",
-          cleanTranscriptTextPath: "/tmp/transcript.clean.txt",
-          cleanTranscriptJsonPath: "/tmp/transcript.clean.json",
-          rawSubtitlePath: "/tmp/en.manual.vtt",
-          metadataJsonPath: "/tmp/metadata.json",
-        },
+        artifacts: [
+          {
+            key: "cleanTranscriptText",
+            label: "clean transcript",
+            kind: "file",
+            path: "/tmp/transcript.clean.txt",
+            primary: true,
+          },
+        ],
       },
     }),
   });

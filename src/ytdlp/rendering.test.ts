@@ -64,14 +64,45 @@ test("renders success results with artifacts in expanded view", () => {
     previewText: "Hello",
     previewTruncated: false,
     warnings: ["minor warning"],
-    artifacts: {
-      transcriptTextPath: "/tmp/pi-yt/transcript.txt",
-      transcriptJsonPath: "/tmp/pi-yt/transcript.json",
-      cleanTranscriptTextPath: "/tmp/pi-yt/transcript.clean.txt",
-      cleanTranscriptJsonPath: "/tmp/pi-yt/transcript.clean.json",
-      rawSubtitlePath: "/tmp/pi-yt/en.vtt",
-      metadataJsonPath: "/tmp/pi-yt/metadata.json",
-    },
+    artifacts: [
+      {
+        key: "cleanTranscriptText",
+        label: "clean transcript",
+        kind: "file",
+        path: "/tmp/pi-yt/transcript.clean.txt",
+        primary: true,
+      },
+      {
+        key: "cleanTranscriptJson",
+        label: "clean transcript JSON",
+        kind: "file",
+        path: "/tmp/pi-yt/transcript.clean.json",
+      },
+      {
+        key: "transcriptText",
+        label: "raw transcript",
+        kind: "file",
+        path: "/tmp/pi-yt/transcript.txt",
+      },
+      {
+        key: "transcriptJson",
+        label: "raw transcript JSON",
+        kind: "file",
+        path: "/tmp/pi-yt/transcript.json",
+      },
+      {
+        key: "rawSubtitle",
+        label: "raw subtitle",
+        kind: "file",
+        path: "/tmp/pi-yt/en.vtt",
+      },
+      {
+        key: "metadata",
+        label: "metadata",
+        kind: "file",
+        path: "/tmp/pi-yt/metadata.json",
+      },
+    ],
   };
 
   const collapsed = renderYtTranscriptResult(
