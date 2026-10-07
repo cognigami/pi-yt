@@ -36,6 +36,9 @@ export interface SubtitleTrack {
   ext?: string;
   name?: string;
   url?: string;
+  translated?: boolean;
+  sourceLanguage?: string;
+  targetLanguage?: string;
 }
 
 export interface SubtitleCatalog {

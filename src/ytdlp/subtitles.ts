@@ -45,9 +45,11 @@ export function selectSubtitleTrack(
 ): SelectedSubtitleTrack | undefined {
   const catalog = buildSubtitleCatalog(metadata);
   for (const source of sourceOrder(request.sourcePreference)) {
-    for (const language of request.languages) {
-      const track = choosePreferredTrack(catalog[source][language]);
-      if (track) return { ...track, source };
+    for (const requestedLanguage of request.languages) {
+      for (const language of candidateLanguageKeys(requestedLanguage, source)) {
+        const track = choosePreferredTrack(catalog[source][language]);
+        if (track) return { ...track, source };
+      }
     }
   }
   return undefined;
@@ -366,15 +368,17 @@ function normalizeTrackMap(
   const output: Record<string, SubtitleTrack[]> = {};
   for (const [language, tracks] of Object.entries(tracksByLanguage ?? {})) {
     const normalizedTracks = tracks
-      .map(
-        (track): SubtitleTrack => ({
+      .map((track): SubtitleTrack => {
+        const url = typeof track.url === "string" ? track.url : undefined;
+        return {
           language,
           source,
           ext: typeof track.ext === "string" ? track.ext : undefined,
           name: typeof track.name === "string" ? track.name : undefined,
-          url: typeof track.url === "string" ? track.url : undefined,
-        })
-      )
+          url,
+          ...subtitleLanguageDetails(url),
+        };
+      })
       .filter((track) => track.url || track.ext);
     if (normalizedTracks.length > 0) output[language] = normalizedTracks;
   }
@@ -384,12 +388,43 @@ function normalizeTrackMap(
 function choosePreferredTrack(
   tracks: SubtitleTrack[] | undefined
 ): SubtitleTrack | undefined {
-  if (!tracks || tracks.length === 0) return undefined;
+  const originalTracks = tracks?.filter((track) => !track.translated);
+  if (!originalTracks || originalTracks.length === 0) return undefined;
   return (
-    tracks.find((track) => track.ext === "vtt") ??
-    tracks.find((track) => track.ext === "webvtt") ??
-    tracks[0]
+    originalTracks.find((track) => track.ext === "vtt") ??
+    originalTracks.find((track) => track.ext === "webvtt") ??
+    originalTracks[0]
   );
+}
+
+function candidateLanguageKeys(
+  requestedLanguage: string,
+  source: SubtitleSource
+): string[] {
+  if (source !== "auto" || requestedLanguage.endsWith("-orig")) {
+    return [requestedLanguage];
+  }
+  return [`${requestedLanguage}-orig`, requestedLanguage];
+}
+
+function subtitleLanguageDetails(url: string | undefined): {
+  translated?: boolean;
+  sourceLanguage?: string;
+  targetLanguage?: string;
+} {
+  if (!url) return {};
+  try {
+    const parsed = new URL(url);
+    const sourceLanguage = parsed.searchParams.get("lang") ?? undefined;
+    const targetLanguage = parsed.searchParams.get("tlang") ?? undefined;
+    return {
+      translated: targetLanguage !== undefined,
+      sourceLanguage,
+      targetLanguage,
+    };
+  } catch {
+    return {};
+  }
 }
 
 function sourceOrder(

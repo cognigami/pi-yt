@@ -103,6 +103,68 @@ test("source preferences can force auto-only selection", () => {
   ).toMatchObject({ source: "auto", url: "auto" });
 });
 
+test("automatic captions prefer the original-language alias", () => {
+  const metadata: YtDlpMetadata = {
+    automatic_captions: {
+      en: [
+        {
+          ext: "vtt",
+          url: "https://www.youtube.com/api/timedtext?lang=de&tlang=en",
+        },
+      ],
+      "en-orig": [
+        {
+          ext: "vtt",
+          url: "https://www.youtube.com/api/timedtext?lang=en",
+        },
+      ],
+    },
+  };
+
+  expect(
+    selectSubtitleTrack(metadata, request({ sourcePreference: "auto_only" }))
+  ).toMatchObject({
+    language: "en-orig",
+    source: "auto",
+    translated: false,
+    sourceLanguage: "en",
+  });
+});
+
+test("automatic captions accept an untranslated exact language track", () => {
+  const metadata: YtDlpMetadata = {
+    automatic_captions: {
+      en: [
+        {
+          ext: "vtt",
+          url: "https://www.youtube.com/api/timedtext?lang=en",
+        },
+      ],
+    },
+  };
+
+  expect(
+    selectSubtitleTrack(metadata, request({ sourcePreference: "auto_only" }))
+  ).toMatchObject({ language: "en", translated: false });
+});
+
+test("automatic captions skip translated tracks", () => {
+  const metadata: YtDlpMetadata = {
+    automatic_captions: {
+      en: [
+        {
+          ext: "vtt",
+          url: "https://www.youtube.com/api/timedtext?lang=de&tlang=en",
+        },
+      ],
+    },
+  };
+
+  expect(
+    selectSubtitleTrack(metadata, request({ sourcePreference: "auto_only" }))
+  ).toBeUndefined();
+});
+
 test("subtitle availability reports manual and auto languages", () => {
   const availability = buildSubtitleAvailability(
     {

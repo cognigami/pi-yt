@@ -73,6 +73,39 @@ test("returns no_subtitles with available language metadata", async () => {
   expect(calls[0]?.args).toContain("--no-playlist");
 });
 
+test("returns no_subtitles without downloading a translated automatic track", async () => {
+  const calls: string[][] = [];
+  const result = await fetchSubtitleWithYtDlp({
+    pi: fakePi(async (_binary, args) => {
+      calls.push(args);
+      return {
+        stdout: JSON.stringify({
+          id: "abc",
+          automatic_captions: {
+            en: [
+              {
+                ext: "vtt",
+                url: "https://www.youtube.com/api/timedtext?lang=de&tlang=en",
+              },
+            ],
+          },
+        }),
+        code: 0,
+      };
+    }),
+    request: request({
+      url: "https://www.youtube.com/watch?v=abc",
+      sourcePreference: "auto_only",
+    }),
+  });
+
+  expect(result.status).toBe("no_subtitles");
+  expect(result.warnings.join("\n")).toContain(
+    "translated tracks were skipped"
+  );
+  expect(calls).toHaveLength(1);
+});
+
 test("missing yt-dlp binary produces an actionable error", async () => {
   const error = new Error("spawn yt-dlp ENOENT") as NodeJS.ErrnoException;
   error.code = "ENOENT";

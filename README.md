@@ -46,7 +46,7 @@ Successful `yt-dlp` calls return a truncation-aware cleaned preview plus staged 
 
 When the preview is truncated, read `transcript.clean.txt` through Pi's `read` tool for the full cleaned transcript, or `transcript.txt` when you need original caption timing/fragments.
 
-If requested subtitles are unavailable, the result reports requested languages plus available manual and auto subtitle languages when `yt-dlp` provides them.
+If requested subtitles are unavailable, the result reports requested languages plus available manual and auto subtitle languages when `yt-dlp` provides them. Translated YouTube tracks (timed-text URLs carrying `tlang`) are intentionally skipped. For automatic captions, a requested language such as `en` prefers its original-language alias (`en-orig`) before an untranslated exact `en` track.
 
 When an automatic YouTube subtitle download fails with HTTP 429 and `GEMINI_API_KEY` is configured, the tool sends the canonical public video URL to Gemini and stages:
 

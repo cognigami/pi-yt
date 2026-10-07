@@ -106,7 +106,8 @@ Use `pi-extension-kit` artifact/file helpers where practical so output paths and
 
 This fallback is intentionally independent of `pi-web-access` and does not download or upload an audio track. It must:
 
-- Run only for the classified YouTube automatic-subtitle 429 failure, not for missing binaries or unrelated errors.
+- Prefer original-language automatic-caption aliases such as `en-orig` and skip tracks whose timed-text URL carries `tlang`; translated YouTube tracks are outside the supported selection policy.
+- Run only for a classified YouTube automatic-subtitle 429 on an otherwise eligible original track, not for missing binaries or unrelated errors.
 - Report the result as `generated`, not as a manual or automatic subtitle source.
 - Preserve the original yt-dlp failure and Gemini provider/model in metadata.
 - Warn that wording, completeness, and timestamps may differ from the source.

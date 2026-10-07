@@ -9,7 +9,11 @@ import type {
   SubtitleFetchResult,
   YtDlpMetadata,
 } from "./contracts";
-import { buildSubtitleAvailability, selectSubtitleTrack } from "./subtitles";
+import {
+  buildSubtitleAvailability,
+  buildSubtitleCatalog,
+  selectSubtitleTrack,
+} from "./subtitles";
 
 const YT_DLP_BINARY = "yt-dlp";
 const DEFAULT_OUTPUT_TEMPLATE = "%(id)s.%(ext)s";
@@ -71,13 +75,19 @@ export async function fetchSubtitleWithYtDlp(
     );
     const selectedTrack = selectSubtitleTrack(metadata, options.request);
     if (!selectedTrack) {
+      const translatedLanguages = requestedTranslatedLanguages(
+        metadata,
+        options.request.languages
+      );
       return {
         status: "no_subtitles",
         request: options.request,
         metadata,
         availability,
         warnings: [
-          `No ${options.request.sourcePreference} subtitles found for requested languages: ${options.request.languages.join(", ")}.`,
+          translatedLanguages.length > 0
+            ? `Only translated subtitle tracks matched ${translatedLanguages.join(", ")}; translated tracks were skipped.`
+            : `No ${options.request.sourcePreference} subtitles found for requested languages: ${options.request.languages.join(", ")}.`,
         ],
       };
     }
@@ -308,6 +318,19 @@ function compactOutput(text: string): string | undefined {
 
 function formatCommand(args: readonly string[]): string {
   return [YT_DLP_BINARY, ...args].join(" ");
+}
+
+function requestedTranslatedLanguages(
+  metadata: YtDlpMetadata,
+  requestedLanguages: readonly string[]
+): string[] {
+  const catalog = buildSubtitleCatalog(metadata);
+  return requestedLanguages.filter((language) =>
+    [
+      ...(catalog.manual[language] ?? []),
+      ...(catalog.auto[language] ?? []),
+    ].some((track) => track.translated)
+  );
 }
 
 function isHttp429Error(error: unknown): boolean {
